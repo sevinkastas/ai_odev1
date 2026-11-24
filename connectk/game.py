@@ -163,6 +163,22 @@ class Game:
         return "\n".join(lines)
 
 
+def random_positions(game, count, seed, min_plies=6, max_plies=24):
+    """Seed'li rastgele hamlelerle 'count' tane TERMİNAL OLMAYAN konum üret.
+    Aynı seed her zaman aynı konumları verir (ölçümler tekrarlanabilir)."""
+    rng = random.Random(seed)
+    out = []
+    while len(out) < count:
+        s = game.initial_state()
+        for _ in range(rng.randint(min_plies, max_plies)):
+            if game.is_terminal(s):
+                break
+            s = game.result(s, rng.choice(game.actions(s)))
+        if not game.is_terminal(s):
+            out.append(s)
+    return out
+
+
 def perft(game, s, n):
     """Tam derinlik n'deki yaprak sayısı (föydeki tanım: budama yok,
     terminal durumdan hamle yapılmaz, terminal durum bir yaprak sayılır)."""

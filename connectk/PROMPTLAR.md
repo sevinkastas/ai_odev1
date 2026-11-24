@@ -21,3 +21,13 @@ Kullanılan araç: Claude Code (Claude Opus 5.5), VS Code eklentisi.
 - **Kullandığım kısım:** `search.py` (Stats, zero_eval, center_order, max_value, min_value,
   minimax_decision, choose_move), `tests/test_minimax.py`, `experiments.py stage1`.
 - **Kendim kontrol ettiğim:** boş tahtada derinlik 2 düğüm sayısı 1 + 8 + 64 = 73; P2'de 65 = 1 + 1 + 7·9.
+
+## 4. Aşama 2 — α-β budaması ve hamle sıralaması
+- **Ne istedim:** α-β (ab_max_value/ab_min_value, kökte alpha güncellemesi), üç sıralama (none, center_out,
+  tactical_center_out; Misère'de intihar hamlesi sona), 50 konumda doğruluk testi, düğüm/maliyet ölçümü ve grafik.
+- **Kullandığım kısım:** `search.py` (order_*, ORDERINGS, ab_*, alphabeta_decision, noise_eval),
+  `game.random_positions`, `tests/test_alphabeta.py`, `experiments.py stage2`.
+- **Önerinin gerekçesi:** Eval = 0 ile eşitlik testi zayıf kaldığı için test/ölçümde ek olarak deterministik
+  "gürültülü" Eval kullanıldı.
+- **Kendim kontrol ettiğim:** β kesme koşulunu (`>=` → `>`, `<=`, `>= alpha`) kopyada bozup testlerin
+  yakaladığını gördüm.

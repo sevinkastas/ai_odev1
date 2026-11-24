@@ -66,7 +66,57 @@ konumda her koşu aynı hamleyi verir.
 
 ## Aşama 2 — α-β budaması ve hamle sıralaması
 
-_(doldurulacak)_
+**Tasarım.** `ab_max_value` / `ab_min_value`: MAX'te `v >= beta` ise kes, MIN'de `v <= alpha` ise kes
+(eşitlikte de kesmeyi seçtim: değer aynı, düğüm daha az). Kökte her çocuk aynı fonksiyonla çağrılır ve
+alpha (MAX sırasıysa) güncellenir; hamle yalnızca kesin iyileşmede değişir. Üç sıralama:
+(a) `none` soldan sağa, (b) `center_out` merkezden dışarı,
+(c) `tactical_center_out`: standartta önce kazanan, sonra engelleyen hamle; **Misère'de kendi 5'lisini
+tamamlayan intihar hamlesi en sona**; geri kalanı merkezden dışarı.
+
+**Doğruluk testi.** `random_positions(seed=52)` ile 50 terminal olmayan konum (6–24 rastgele hamle), derinlik 6.
+İki yaprak değerlendirmesiyle denedim: Föydeki gibi **Eval = 0** ve her yaprağa konuma bağlı sabit, sözde rastgele
+değer veren **gürültülü Eval**. Eval = 0'da neredeyse bütün değerler 0 olduğundan "α-β = minimax" testi zayıf
+kalır; gürültülü Eval gerçek bir sınamadır. **50 × 3 × 2 = 300 aramanın hepsinde kök değeri, seçilen hamlenin
+değeri minimax ile aynı; α-β hiçbir konumda minimax'tan fazla düğüme bakmadı** (`uyumsuz = 0`).
+
+**Ortalama düğüm** (`results/stage2_summary.csv`, grafik `results/stage2_nodes.png`):
+
+| Eval | yöntem | ort. düğüm | minimax'a oran | b_etkin | ort. süre (ms) | µs/düğüm |
+|---|---|---|---|---|---|---|
+| 0 | minimax | 243 047 | 1.000 | 7.90 | 725 | 2.98 |
+| 0 | (a) none | 1 615 | 0.007 | 3.43 | 5.1 | 3.16 |
+| 0 | (b) center_out | 1 639 | 0.007 | 3.43 | 6.2 | 3.78 |
+| 0 | (c) tactical | 1 608 | 0.007 | 3.42 | 14.0 | 8.69 |
+| gürültü | minimax | 243 047 | 1.000 | 7.90 | 812 | 3.34 |
+| gürültü | (a) none | 20 064 | 0.083 | 5.21 | 69 | 3.45 |
+| gürültü | (b) center_out | 22 773 | 0.094 | 5.32 | 92 | 4.05 |
+| gürültü | (c) tactical | 22 562 | 0.093 | 5.32 | 145 | 6.45 |
+
+![Aşama 2 düğüm sayısı](results/stage2_nodes.png)
+
+**Sıralama maliyeti** (tek `order()` çağrısı, `results/stage2_order_cost.csv`): none 0.50 µs, center_out 1.68 µs,
+tactical 12.35 µs. Taktik sıralama her hamle için iki kez `makes_line` çağırdığından düğüm başına maliyeti
+yaklaşık 2–3 katına çıkarıyor.
+
+**Yorum.**
+- **Beklenen sıra (c < b < a) bu aşamada çıkmadı; nedeni Eval.** Sıralama, "iyi hamleyi önce dene" demektir;
+  bu, değerlerin hamle kalitesiyle ilişkili olmasını gerektirir. Eval = 0'da bütün terminal olmayan yapraklar
+  eşittir: ilk çocuk zaten pencerenin sınırına ulaşır ve `>=` / `<=` eşitlikte kestiği için hangi sırayla
+  bakılırsa bakılsın neredeyse mükemmel budama olur (b_etkin 3.4; kuramsal en iyi √8 ≈ 2.83). Gürültülü Eval'de
+  ise değerler merkezle ilişkisizdir; merkez önce gelmesi bir avantaj sağlamaz, hatta biraz kötüleşir.
+  Taktik sıralama Misère'de yalnızca intihar hamlelerini sona atar; bunlar zaten tek düğümlük terminal
+  yapraklar olduğundan budamaya etkisi küçük. Sıralamanın gerçek etkisi Aşama 3'teki anlamlı Eval ile
+  yeniden ölçülecek.
+- **O(b^(m/2)) ile karşılaştırma:** mükemmel sıralamada derinlik 6, b = 8 için yaklaşık 8³ + 8³ − 1 = 1 023 yaprak
+  (Knuth–Moore). Eval = 0 ile ölçülen 1 608 düğüm (iç düğümler dahil) bu sınıra çok yakın. Gürültülü Eval'de
+  22 562, yani en iyi durumun ~22 katı: b_etkin 5.3, minimax'ın 7.9'u ile √8 arasında.
+- **En az budanan konumlar:** gürültülü Eval'de konum 44 (13 hamle oynanmış; α-β/minimax = 0.169).
+  Erken konumlarda hiçbir dal terminale ulaşmaz ve değerler birbirine yakın, rastgele dağılır; kesmeyi
+  tetikleyen ±1'lik kesin değerler yoktur. Eval = 0'da en az budananlar 22–23 hamlelik konumlar (oran ≈ 0.012):
+  orada intihar dalları −1/+1 vererek eşitlikleri bozar ve bazı alt ağaçların tamamen açılması gerekir.
+- **Kontrol noktası 2 hazırlığı:** β kesmesi bir kopyada üç şekilde bozuldu. `>=` → `>` değeri bozmaz, yalnızca
+  düğüm sayısını artırır (sabit konumda 222 → 320). Bunu `test_node_count_regression` yakalar. `<=` ve
+  `>= alpha` değeri bozar; bunları `test_alphabeta_equals_minimax` yakalar.
 
 ## Aşama 3 — Değerlendirme fonksiyonu
 

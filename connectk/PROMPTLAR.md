@@ -41,3 +41,13 @@ Kullanılan araç: Claude Code (Claude Opus 5.5), VS Code eklentisi.
 - **Önerinin gerekçesi:** Misère'ye özgü öznitelik olarak "güvenli hamle farkı" (oyuncunun intihar etmeden
   oynayabileceği sütun sayısı farkı) seçildi; Misère oyun sonu zugzwang ile belirlenir.
 - **Kendim kontrol ettiğim:** `python evaluate.py 0 0 1 1 2 2 3 3` çıktısındaki öznitelikleri tahtada elle saydım.
+
+## 6. Aşama 4 — Zaman sınırlı arama, yer değiştirme tablosu, ufuk etkisi
+- **Ne istedim:** 1 saniyelik iteratif derinleşme (her 1000 düğümde süre kontrolü, Timeout istisnası, yarım
+  derinliği atma, önceki en iyi hamle önce), seed'li Zobrist TT (EXACT/LOWER/UPPER), ufuk uzatması; TT açık/kapalı
+  derinlik ölçümü, TT doğruluk testi, ufuk etkisi örneği ve önce/sonra karşılaştırması.
+- **Kullandığım kısım:** `search.py` (Timeout, Zobrist, SearchResult, TimedSearch: search/_root/_ab/is_forcing),
+  `tests/test_timed.py`, `experiments.py stage4` (depth / tt / horizon).
+- **Önerinin gerekçesi:** Ufuk örneği, Aşama 3 maç kayıtlarındaki konumlarda sığ arama ile derinlik-7 arama
+  karşılaştırılarak otomatik bulundu. İkinci bir uzatma koşulu denendi, fark ölçülemediği için sade olan tutuldu.
+- **Kendim kontrol ettiğim:** Örnek konumu tahtada inceleyip 7. sütunun neden kaybettirdiğini izledim.

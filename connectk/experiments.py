@@ -5,6 +5,8 @@
     python experiments.py stage1            # minimax: hamle, düğüm, b_etkin
     python experiments.py stage2            # 50 konum: minimax vs α-β, 3 sıralama, grafik
     python experiments.py stage3            # 3 ağırlık vektörü, her çift iki yönde 10'ar maç
+    python experiments.py stage4            # 1 sn arama: derinlik, TT doğruluğu, ufuk etkisi
+    python experiments.py stage4 --part depth|tt|horizon
 
 Çıktılar ekrana Markdown tablosu olarak basılır ve results/ klasörüne CSV olarak yazılır.
 Varyant parametreleri komut satırından değiştirilebilir (--R --C --K --V --d).
@@ -20,7 +22,7 @@ import time
 from game import Game, perft, random_positions, MAX, MIN
 from evaluate import Evaluator, WEIGHTS, opening, play_game
 from search import (minimax_decision, alphabeta_decision, ORDERINGS,
-                    zero_eval, noise_eval)
+                    zero_eval, noise_eval, TimedSearch, order_none, order_tactical)
 
 sys.stdout.reconfigure(encoding="utf-8")   # Windows konsolunda Türkçe karakterler bozulmasın
 sys.stderr.reconfigure(encoding="utf-8")
@@ -289,9 +291,156 @@ def stage3(game, args):
 
 
 # ----------------------------------------------------------------------
+# Aşama 4: zaman sınırlı arama
+# ----------------------------------------------------------------------
+def stage4_positions(game):
+    """Kontrol noktası 4 için 10 konum: positions.txt'deki 5 + seed'li 5 rastgele orta oyun konumu."""
+    named = [(name, game.from_moves(m)) for name, m in load_positions()[:5]]
+    rand = random_positions(game, 5, seed=52, min_plies=10, max_plies=30)
+    return named + [(f"R{i + 1}", s) for i, s in enumerate(rand)]
+
+
+def stage4_depth(game, args):
+    """1 saniyelik limitle ulaşılan derinlik: TT açık/kapalı x sıralama (uzatma açık)."""
+    ev = Evaluator(game)
+    positions = stage4_positions(game)
+    configs = [("tactical", order_tactical, False), ("tactical", order_tactical, True),
+               ("none", order_none, False), ("none", order_none, True)]
+    header = ["konum", "hamle no"] + [f"{o} TT={'açık' if tt else 'kapalı'}" for o, _, tt in configs]
+    rows, agg = [], {i: [] for i in range(len(configs))}
+    for name, s in positions:
+        row = [name, s.n_moves]
+        for i, (_, order, tt) in enumerate(configs):
+            r = TimedSearch(game, ev, use_tt=tt, order=order).search(s, args.time_limit)
+            agg[i].append(r)
+            row.append(f"d={r.depth} / {r.nodes} / {r.elapsed:.3f}s")
+        rows.append(row)
+        print(f"  {name} tamam", file=sys.stderr)
+    print(f"Hücre: ulaşılan derinlik / düğüm / süre. Süre bütçesi {args.time_limit} s\n")
+    print_table(header, rows)
+    write_csv("stage4_depth_per_position.csv", header, rows)
+    summary = []
+    for i, (oname, _, tt) in enumerate(configs):
+        rs = agg[i]
+        summary.append([oname, "açık" if tt else "kapalı",
+                        f"{sum(r.depth for r in rs) / len(rs):.1f}",
+                        min(r.depth for r in rs), max(r.depth for r in rs),
+                        f"{sum(r.nodes for r in rs) / len(rs):.0f}",
+                        f"{max(r.elapsed for r in rs):.3f}"])
+    print()
+    sh = ["sıralama", "TT", "ort. derinlik", "min", "maks", "ort. düğüm", "en yavaş hamle (s)"]
+    print_table(sh, summary)
+    write_csv("stage4_depth_summary.csv", sh, summary)
+
+
+def stage4_tt(game, args):
+    """TT doğruluğu: sabit derinlikte, TT açık arama kök değeri = TT'siz α-β kök değeri (50 konum)."""
+    positions = random_positions(game, args.n_pos, seed=args.seed)
+    header = ["eval", "derinlik", "konum", "uyumsuz", "TT'siz ort. düğüm", "TT'li ort. düğüm"]
+    rows = []
+    for ev_name in ("noise", "full"):
+        evaluate = EVALS[ev_name](game)
+        for depth in (4, 6):
+            bad, n_plain, n_tt = 0, 0, 0
+            for s in positions:
+                _, v_plain, st = alphabeta_decision(game, s, depth, evaluate, order_tactical)
+                ts = TimedSearch(game, evaluate, use_tt=True, extend=False, order=order_tactical)
+                r = ts.search(s, math.inf, max_depth=depth)
+                # ID son iterasyonu 'depth' olmalı (erken kesin sonuçta daha önce durabilir)
+                if r.depth != depth and abs(r.value) < 1:
+                    bad += 1
+                v_tt = r.value
+                if r.depth < depth:          # kesin sonuç erken bulunduysa aynı derinlikte tekrar ara
+                    v_tt = TimedSearch(game, evaluate, use_tt=True, extend=False,
+                                       order=order_tactical)._root(s, depth, r.move)[1]
+                if v_tt != v_plain:
+                    bad += 1
+                    print(f"  UYUMSUZ {ev_name} d={depth}: {v_plain} != {v_tt}", file=sys.stderr)
+                n_plain += st.nodes
+                n_tt += ts.nodes
+            rows.append([ev_name, depth, len(positions), bad,
+                         f"{n_plain / len(positions):.0f}", f"{n_tt / len(positions):.0f}"])
+            print(f"  {ev_name} d={depth} tamam", file=sys.stderr)
+    print()
+    print_table(header, rows)
+    write_csv("stage4_tt_check.csv", header, rows)
+
+
+def stage4_horizon(game, args):
+    """Ufuk etkisi: Aşama 3 maçlarından konumlar; sığ arama (derinlik D) kanıtlanmış kayba giden bir
+    hamle seçiyor mu? 'Doğru' değer derinlik-7 aramayla bulunur. Uzatmalı / uzatmasız karşılaştırılır."""
+    ev = Evaluator(game)
+    path = os.path.join(RESULTS, "stage3_games.csv")
+    with open(path, encoding="utf-8") as f:
+        games = [[int(x) for x in r["hamleler"].split()] for r in csv.DictReader(f)]
+    # Her oyundan 18. hamleden itibaren her 3 hamlede bir konum; aynı oyunlar tekrar ettiği için tekilleştir
+    positions = sorted({tuple(mv[:k]) for mv in games for k in range(18, len(mv) - 1, 3)})
+    truth_depth = 7
+
+    def search(s, depth, extend, limit=math.inf):
+        return TimedSearch(game, ev, use_tt=True, extend=extend).search(s, limit, max_depth=depth)
+
+    def move_value(s, a):
+        c = game.result(s, a)
+        return game.utility(c) if game.is_terminal(c) else search(c, truth_depth - 1, True, 30.0).value
+
+    header = ["sığ derinlik", "konum", "uzatmasız hata", "uzatmalı hata"]
+    rows, examples = [], []
+    for D in (2, 3, 4):
+        bp_total = be_total = 0
+        for mv in positions:
+            s = game.from_moves(mv)
+            sign = 1 if s.to_move == MAX else -1
+            plain = search(s, D, False).move
+            ext = search(s, D, True).move
+            deep = search(s, truth_depth, True, 30.0)
+            vp = sign * move_value(s, plain)
+            ve = vp if ext == plain else sign * move_value(s, ext)
+            vd = sign * deep.value
+            bp, be = (vp == -1 and vd > -1), (ve == -1 and vd > -1)
+            bp_total += bp
+            be_total += be
+            if bp:
+                examples.append([D, " ".join(map(str, mv)), plain, ext, deep.move, f"{vd:+.3f}",
+                                 "düzeldi" if not be else "düzelmedi"])
+        rows.append([D, len(positions), bp_total, be_total])
+        print(f"  D={D} tamam", file=sys.stderr)
+    print(f"'Hata' = sığ aramanın seçtiği hamle derinlik-{truth_depth} aramada kanıtlanmış kayıp (−1)"
+          f" iken kaybetmeyen bir hamle var.\n")
+    print_table(header, rows)
+    write_csv("stage4_horizon_counts.csv", header, rows)
+    eh = ["D", "hamleler", "sığ hamle", "uzatmalı hamle", "derin hamle", "derin değer", "uzatma"]
+    print()
+    print_table(eh, examples)
+    write_csv("stage4_horizon_examples.csv", eh, examples)
+
+    # Kanıt: örnek konumda derinlik arttıkça seçilen hamlenin değişmesi
+    if examples:
+        mv = [int(x) for x in examples[0][1].split()]
+        s = game.from_moves(mv)
+        print(f"\nÖrnek konum ({len(mv)} hamle, sıra {'MAX' if s.to_move == MAX else 'MIN'}):")
+        print(game.render(s))
+        dh = ["derinlik", "uzatmasız hamle", "uzatmasız değer", "uzatmalı hamle", "uzatmalı değer"]
+        drows = []
+        for depth in range(1, truth_depth + 1):
+            a = search(s, depth, False)
+            b = search(s, depth, True)
+            drows.append([depth, a.move, f"{a.value:+.3f}", b.move, f"{b.value:+.3f}"])
+        print_table(dh, drows)
+        write_csv("stage4_horizon_depths.csv", dh, drows)
+
+
+def stage4(game, args):
+    parts = ["depth", "tt", "horizon"] if args.part == "all" else [args.part]
+    for part in parts:
+        print(f"\n===== Aşama 4: {part} =====\n")
+        {"depth": stage4_depth, "tt": stage4_tt, "horizon": stage4_horizon}[part](game, args)
+
+
+# ----------------------------------------------------------------------
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("stage", choices=["stage0", "stage1", "stage2", "stage3"])
+    p.add_argument("stage", choices=["stage0", "stage1", "stage2", "stage3", "stage4"])
     p.add_argument("--R", type=int, default=6)
     p.add_argument("--C", type=int, default=8)
     p.add_argument("--K", type=int, default=5)
@@ -303,10 +452,12 @@ def main():
     p.add_argument("--n-pos", type=int, default=50)
     p.add_argument("--evals", default="zero,noise,full")
     p.add_argument("--games", type=int, default=10)
+    p.add_argument("--part", default="all", choices=["all", "depth", "tt", "horizon"])
+    p.add_argument("--time-limit", type=float, default=0.9)
     args = p.parse_args()
     game = Game(args.R, args.C, args.K, args.V, args.d)
     print(f"Varyant (R, C, K, V, d) = ({game.R}, {game.C}, {game.K}, {game.V}, {game.d})\n")
-    {"stage0": stage0, "stage1": stage1, "stage2": stage2, "stage3": stage3}[args.stage](game, args)
+    {"stage0": stage0, "stage1": stage1, "stage2": stage2, "stage3": stage3, "stage4": stage4}[args.stage](game, args)
 
 
 if __name__ == "__main__":

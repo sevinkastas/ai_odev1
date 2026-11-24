@@ -1,0 +1,5 @@
+sıralama,TT,ort. derinlik,min,maks,ort. düğüm,en yavaş hamle (s)
+tactical,kapalı,6.6,6,8,27700,0.927
+tactical,açık,8.6,8,9,30700,0.938
+none,kapalı,7.2,6,8,32200,0.941
+none,açık,9.3,8,11,37200,0.930

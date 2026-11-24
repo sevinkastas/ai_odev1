@@ -183,7 +183,88 @@ ham toplamı ve Eval'i yazar (örnek: f = (1, 1, 1, 1, 0, −1), ham −0.5, Eva
 
 ## Aşama 4 — Zaman sınırlı arama
 
-_(doldurulacak)_
+**Tasarım (`search.TimedSearch`).** İteratif derinleşme: derinlik 1, 2, 3, … Her 1000 düğümde bir
+`time.perf_counter()` kontrolü; süre dolunca `Timeout` istisnası fırlatılır, kökte yakalanır ve **yarım kalan
+derinlik atılır**, son tamamlanan derinliğin hamlesi döner. Önceki iterasyonun en iyi hamlesi kökte ilk sırada
+denenir. Kesin kazanç/kayıp (|değer| = 1) bulunursa ya da tahtadaki boş hücre sayısına ulaşılırsa erken durur.
+Arama süresince çöp toplayıcı kapalıdır (`gc.disable()`), sonra açılır.
+
+**Yarım iterasyon neden atılır?** Kökte hamleler sırayla aranır. Süre, ilk (önceki iterasyonun en iyisi) hamle
+bittikten hemen sonra dolarsa, "en iyi hamle" yalnızca o tek hamleye bakılarak seçilmiş olur. Diğer hamleler
+hiç incelenmemiştir; içlerinden biri daha iyi olabilir. Daha kötüsü, ilk hamlenin yeni derinlikteki değeri bir
+tuzak ortaya çıkarmışsa (değeri düştüyse) bile başka seçenek olmadığı için yine o seçilir. Tamamlanmış
+derinliğin sonucu ise bütün kök hamleleri aynı derinlikte karşılaştırmıştır.
+
+**Yer değiştirme tablosu.** Zobrist anahtarı: her (hücre, oyuncu) için seed'li (52) 64-bit sayı, sıra MIN'deyse
+ayrıca `side` sayısı XOR'lanır (aynı taşlar + farklı sıra = farklı anahtar). Anahtar hamlede artımlı
+güncellenir (`key ^ Z[hücre][oyuncu] ^ side`). Kayıt: `anahtar → (derinlik, değer, bayrak, en iyi hamle)`.
+Bayrak: değer pencerenin içindeyse EXACT, β kesmesinden geldiyse LOWER, α'yı geçemediyse UPPER. Kayıt yalnızca
+kayıtlı derinlik ≥ gereken derinlik ise kullanılır; tablonun en iyi hamlesi sıralamada başa alınır.
+
+**1 saniyede ulaşılan derinlik** (10 konum: P1–P5 + seed'li 5 rastgele; bütçe 0.9 s, uzatma açık;
+`results/stage4_depth_*.csv`):
+
+| sıralama | TT | ort. derinlik | min–maks | ort. düğüm | en yavaş hamle (s) |
+|---|---|---|---|---|---|
+| tactical | kapalı | 6.6 | 6–8 | 27 700 | 0.927 |
+| tactical | açık | 8.6 | 8–9 | 30 700 | 0.938 |
+| none | kapalı | 7.2 | 6–8 | 32 200 | 0.941 |
+| none | açık | **9.3** | 8–11 | 37 200 | 0.930 |
+
+- **TT, aynı sürede ortalama 2 kat daha derine indiriyor.** Düğüm sayısı neredeyse aynı (süre sınırlı), ama tablo
+  tekrar eden konumları ve önceki iterasyonların en iyi hamlelerini kullandığı için her derinlik daha az düğümle
+  bitiyor. Sabit derinlik 6'da gerçek Eval ile TT düğümü 7 329 → 2 496'ya indirdi (`stage4_tt_check.csv`).
+- Aşama 2–3'teki bulgu burada da geçerli: Misère'de sıralamasız (soldan sağa) düzen merkezli düzenden derin
+  iniyor. Turnuva ajanı Misère'de `none` + TT kullanacak.
+- **Hiçbir hamle 1 saniyeyi aşmadı** (en yavaş 0.941 s). Taşma (~40 ms) süre kontrolünün 1000 düğümde bir
+  yapılmasından gelir (≈ 1000 × 28 µs); ajan güvenlik payı için 0.85 s bütçe kullanır.
+
+**TT doğruluğu** (Aşama 2 testi tablo açıkken yeniden: 50 konum, sabit derinlik, uzatma kapalı):
+gürültülü ve gerçek Eval, derinlik 4 ve 6, **200 karşılaştırmada 0 uyumsuz**: tablolu kök değeri tablosuz α-β ile
+aynı. Sabit derinlikte bir konuma hep aynı katta ulaşıldığından (hamle sayısı aynı), kayıtlı derinlik ile gereken
+derinlik eşittir; bayraklar yanlış olsaydı değer farkı çıkardı.
+
+**Ufuk etkisi.** Aşama 3 maçlarından 284 benzersiz konum (18. hamleden itibaren her 3 hamlede bir). "Hata": sığ
+aramanın (derinlik D) seçtiği hamle, derinlik-7 aramada **kanıtlanmış kayıp** (−1) iken kaybetmeyen bir hamle var.
+
+| sığ derinlik D | uzatmasız hata | uzatmalı hata |
+|---|---|---|
+| 2 | 3 | 1 |
+| 3 | 1 | 1 |
+| 4 | 1 | 0 |
+
+**Örnek konum** (36 hamle, sıra MAX; `1 4 3 3 3 3 4 3 3 4 4 4 1 4 2 5 2 0 2 1 5 5 1 5 1 1 0 6 0 6 2 0 7 6 7 0`):
+
+```
+. O . X O . . .
+O X . O O . . .
+O X X O X O . .
+X O X X O O O .
+X X X O X X O X
+O X X X O O O X
+0 1 2 3 4 5 6 7
+```
+
+| derinlik | uzatmasız hamle (değer) | uzatmalı hamle (değer) |
+|---|---|---|
+| 1–3 | 7 (−0.80…−0.83) | 7 |
+| 4 | **7 (−0.732)** | **6 (−0.801)** |
+| 5 | 6 (−0.825) | 6 (−0.825) |
+| 6–7 | 6 (−0.67 / −0.754) | 6 (−0.754) |
+
+Derinlik 4'e kadar uzatmasız arama 7. sütunu seçiyor; derinlik 7'de bu hamlenin kanıtlanmış kayıp olduğu görülüyor
+ve derinlik 5'ten itibaren hamle 6'ya dönüyor. **Hamlenin derinlikle değişmesi ufuk etkisinin kanıtıdır**: kayıp
+dizisi sığ aramanın ufkunun hemen ötesindeydi ve Eval −0.73 ile "o kadar da kötü değil" diyordu.
+
+**Düzeltme: zorlanmış konumlarda uzatma.** Derinlik sınırına gelindiğinde konum sakin değilse 1 kat daha
+aranır (yol başına en çok 4 uzatma). Misère'de "sakin değil" = sırası gelenin güvenli (intihar olmayan) hamlesi
+≤ 1 (zorlanmış hamle); standart kuralda = oynanabilir bir hücre birinin K'lı dizisini tamamlıyor (acil
+kazanma/engelleme). Önce/sonra: toplam ufuk hatası 5 → 2; örnek konumda doğru hamle bir kat önce
+(derinlik 4) bulunuyor. Ayrıca "rakip de zorlanmışsa uzat" koşulunu denedim; hata sayıları bu kadar küçükken
+iki koşul ayırt edilemedi, daha sade olanı tuttum.
+
+**Kontrol noktası 4:** `python experiments.py stage4 --part depth` 10 konumda ulaşılan derinliği ve her hamlenin
+süresini yazar.
 
 ## Aşama 5 — Turnuva ve yenilgi analizi
 

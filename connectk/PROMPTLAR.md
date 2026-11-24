@@ -51,3 +51,14 @@ Kullanılan araç: Claude Code (Claude Opus 5.5), VS Code eklentisi.
 - **Önerinin gerekçesi:** Ufuk örneği, Aşama 3 maç kayıtlarındaki konumlarda sığ arama ile derinlik-7 arama
   karşılaştırılarak otomatik bulundu. İkinci bir uzatma koşulu denendi, fark ölçülemediği için sade olan tutuldu.
 - **Kendim kontrol ettiğim:** Örnek konumu tahtada inceleyip 7. sütunun neden kaybettirdiğini izledim.
+
+## 7. Aşama 5 — Turnuva ajanı ve prova
+- **Ne istedim:** `agent.py` komut satırı protokolü (MOVES/QUIT, stdout flush, debug stderr'e, tüm sütunlar
+  doluyken / geçersiz geçmişte çökmeme), uç varyant testleri, turnuva provası için hakem scripti.
+- **Kullandığım kısım:** `agent.py` (Agent.choose, legal_fallback, run, main), `arena.py` (Player, play),
+  `tests/test_agent.py`, `experiments.py stage5`.
+- **Varsayım:** V = 3'te engeller `--seed` ile üretiliyor (turnuvada iki ajanın ortak değeri); `--d` ile değiştirilebilir.
+- **Yenilgi analizi:** Turnuvadan sonra kendi oyun kaydımla yazılacak.
+- **Provadan sonra:** Ajan zayıf rakibe kaybettiğinde nedenini birlikte inceledik; kayıp kanıtlanınca "kaybı en
+  uzun geciktiren hamle" için `TimedSearch.terminal_value` (uzaklık ölçekli terminal değeri) eklendi ve Aşama 4
+  ölçümleri son kodla yeniden üretildi. Kalan yenilginin nedeni (satır paritesi / zugzwang) rapora yazıldı.

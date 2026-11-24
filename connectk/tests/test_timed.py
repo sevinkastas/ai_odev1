@@ -49,7 +49,7 @@ class TestTimedSearch(unittest.TestCase):
         # Tablo açıkken sabit derinlikteki değer, tablosuz α-β ile aynı olmalı (bayraklar doğruysa).
         for s in random_positions(self.g, 12, seed=52):
             plain = alphabeta_decision(self.g, s, 4, noise_eval, order_tactical)[1]
-            ts = TimedSearch(self.g, noise_eval, use_tt=True, extend=False)
+            ts = TimedSearch(self.g, noise_eval, use_tt=True, extend=False, distance=False)
             self.assertEqual(ts._root(s, 4, None)[1], plain)
 
     def test_respects_time_limit(self):
@@ -78,6 +78,24 @@ class TestTimedSearch(unittest.TestCase):
         g = Game(R=2, C=2, K=5, V=2)
         r = TimedSearch(g, Evaluator(g)).search(g.initial_state(), math.inf)
         self.assertEqual(r.value, 0)            # küçük tahta: beraberlik kanıtlanır
+
+
+class TestDistance(unittest.TestCase):
+    def test_terminal_value_prefers_fast_win_and_slow_loss(self):
+        g = Game(6, 8, 5, 0)
+        ts = TimedSearch(g, Evaluator(g))
+        early = g.from_moves("0 0 1 1 2 2 3 3 4")                   # MAX 9. hamlede kazandı
+        late = g.from_moves("7 0 0 1 1 2 2 3 3 4")                  # MIN 10. hamlede kazandı
+        self.assertGreater(ts.terminal_value(early), 1)               # kazanç > 1 > her Eval
+        self.assertLess(ts.terminal_value(late), -1)
+        # Aynı oyuncu için: erken kazanç geç kazançtan iyi; geç kayıp erken kayıptan az kötü
+        self.assertGreater(ts.terminal_value(early), -ts.terminal_value(late))
+
+    def test_takes_immediate_win(self):
+        g = Game(6, 8, 5, 0)
+        r = TimedSearch(g, Evaluator(g)).search(g.from_moves("0 0 1 1 2 2 3 3"), 0.5)
+        self.assertEqual(r.move, 4)
+        self.assertGreater(r.value, 1)
 
 
 class TestHorizon(unittest.TestCase):

@@ -7,6 +7,7 @@
     python experiments.py stage3            # 3 ağırlık vektörü, her çift iki yönde 10'ar maç
     python experiments.py stage4            # 1 sn arama: derinlik, TT doğruluğu, ufuk etkisi
     python experiments.py stage4 --part depth|tt|horizon
+    python experiments.py stage5 --seed 7   # turnuva provası: her V, 6x8 ve 7x8, ajan vs baseline
 
 Çıktılar ekrana Markdown tablosu olarak basılır ve results/ klasörüne CSV olarak yazılır.
 Varyant parametreleri komut satırından değiştirilebilir (--R --C --K --V --d).
@@ -344,7 +345,8 @@ def stage4_tt(game, args):
             bad, n_plain, n_tt = 0, 0, 0
             for s in positions:
                 _, v_plain, st = alphabeta_decision(game, s, depth, evaluate, order_tactical)
-                ts = TimedSearch(game, evaluate, use_tt=True, extend=False, order=order_tactical)
+                ts = TimedSearch(game, evaluate, use_tt=True, extend=False, order=order_tactical,
+                                 distance=False)
                 r = ts.search(s, math.inf, max_depth=depth)
                 # ID son iterasyonu 'depth' olmalı (erken kesin sonuçta daha önce durabilir)
                 if r.depth != depth and abs(r.value) < 1:
@@ -352,7 +354,7 @@ def stage4_tt(game, args):
                 v_tt = r.value
                 if r.depth < depth:          # kesin sonuç erken bulunduysa aynı derinlikte tekrar ara
                     v_tt = TimedSearch(game, evaluate, use_tt=True, extend=False,
-                                       order=order_tactical)._root(s, depth, r.move)[1]
+                                       order=order_tactical, distance=False)._root(s, depth, r.move)[1]
                 if v_tt != v_plain:
                     bad += 1
                     print(f"  UYUMSUZ {ev_name} d={depth}: {v_plain} != {v_tt}", file=sys.stderr)
@@ -397,7 +399,8 @@ def stage4_horizon(game, args):
             vp = sign * move_value(s, plain)
             ve = vp if ext == plain else sign * move_value(s, ext)
             vd = sign * deep.value
-            bp, be = (vp == -1 and vd > -1), (ve == -1 and vd > -1)
+            # |değer| >= 1 kesin sonuçtur (distance ölçeklemesiyle kayıp -1.0xx olabilir)
+            bp, be = (vp <= -1 and vd > -1), (ve <= -1 and vd > -1)
             bp_total += bp
             be_total += be
             if bp:
@@ -438,9 +441,40 @@ def stage4(game, args):
 
 
 # ----------------------------------------------------------------------
+# Aşama 5: turnuva provası (ayrı süreçler, hakem arena.py)
+# ----------------------------------------------------------------------
+def stage5(game, args):
+    from arena import play
+    ours = "python agent.py"
+    baseline = "python agent.py --depth 3 --no-tt --no-ext"     # zayıflatılmış eski sürüm
+    header = ["R×C, K", "V", "MAX", "MIN", "sonuç", "hamle", "en uzun yanıt (ajanımız, s)"]
+    rows, worst, problems = [], 0.0, 0
+    for (R, C, K) in ((6, 8, 5), (7, 8, 5)):
+        for V in range(4):
+            g = Game(R, C, K, V, args.seed)
+            gargs = ["--R", str(R), "--C", str(C), "--K", str(K), "--V", str(V), "--seed", str(args.seed)]
+            for a_name, a_cmd, b_name, b_cmd in (("ajan", ours, "baseline", baseline),
+                                                 ("baseline", baseline, "ajan", ours)):
+                result, winner, moves, max_time = play(g, a_cmd, b_cmd, gargs)
+                ours_key = "A" if a_name == "ajan" else "B"
+                worst = max(worst, max_time[ours_key])
+                label = {"A": a_name, "B": b_name}.get(winner, "berabere")
+                if "aştı" in result or "yasa dışı" in result or "geçersiz" in result:
+                    problems += 1
+                rows.append([f"{R}×{C}, {K}", V, a_name, b_name,
+                             f"{label} ({result})" if winner else result, len(moves),
+                             f"{max_time[ours_key]:.3f}"])
+                print(f"  {R}x{C} V={V} {a_name}-{b_name}: {result}", file=sys.stderr)
+    print(f"seed = {args.seed}. Ajan: 0.85 s bütçe, TT + uzatma. Baseline: sabit derinlik 3, TT/uzatma yok.\n")
+    print_table(header, rows)
+    print(f"\nSüre aşımı / yasa dışı / geçersiz çıktı: {problems}. Ajanımızın en uzun yanıtı: {worst:.3f} s")
+    write_csv("stage5_rehearsal.csv", header, rows)
+
+
+# ----------------------------------------------------------------------
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("stage", choices=["stage0", "stage1", "stage2", "stage3", "stage4"])
+    p.add_argument("stage", choices=["stage0", "stage1", "stage2", "stage3", "stage4", "stage5"])
     p.add_argument("--R", type=int, default=6)
     p.add_argument("--C", type=int, default=8)
     p.add_argument("--K", type=int, default=5)
@@ -457,7 +491,7 @@ def main():
     args = p.parse_args()
     game = Game(args.R, args.C, args.K, args.V, args.d)
     print(f"Varyant (R, C, K, V, d) = ({game.R}, {game.C}, {game.K}, {game.V}, {game.d})\n")
-    {"stage0": stage0, "stage1": stage1, "stage2": stage2, "stage3": stage3, "stage4": stage4}[args.stage](game, args)
+    {"stage0": stage0, "stage1": stage1, "stage2": stage2, "stage3": stage3, "stage4": stage4, "stage5": stage5}[args.stage](game, args)
 
 
 if __name__ == "__main__":

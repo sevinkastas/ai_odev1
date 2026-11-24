@@ -206,17 +206,19 @@ kayıtlı derinlik ≥ gereken derinlik ise kullanılır; tablonun en iyi hamles
 
 | sıralama | TT | ort. derinlik | min–maks | ort. düğüm | en yavaş hamle (s) |
 |---|---|---|---|---|---|
-| tactical | kapalı | 6.6 | 6–8 | 27 700 | 0.927 |
-| tactical | açık | 8.6 | 8–9 | 30 700 | 0.938 |
-| none | kapalı | 7.2 | 6–8 | 32 200 | 0.941 |
-| none | açık | **9.3** | 8–11 | 37 200 | 0.930 |
+| tactical | kapalı | 6.7 | 6–8 | 29 700 | 0.931 |
+| tactical | açık | 8.9 | 8–10 | 35 800 | 0.928 |
+| none | kapalı | 7.2 | 6–8 | 36 800 | 0.934 |
+| none | açık | **9.4** | 8–11 | 42 600 | 0.918 |
 
-- **TT, aynı sürede ortalama 2 kat daha derine indiriyor.** Düğüm sayısı neredeyse aynı (süre sınırlı), ama tablo
+_(Son kodla, Aşama 5'teki uzaklık ölçeklemesi dahil, yeniden ölçüldü.)_
+
+- **TT, aynı sürede ortalama 2 kat daha derine indiriyor** (6.7 → 8.9, 7.2 → 9.4). Düğüm sayısı neredeyse aynı (süre sınırlı), ama tablo
   tekrar eden konumları ve önceki iterasyonların en iyi hamlelerini kullandığı için her derinlik daha az düğümle
   bitiyor. Sabit derinlik 6'da gerçek Eval ile TT düğümü 7 329 → 2 496'ya indirdi (`stage4_tt_check.csv`).
 - Aşama 2–3'teki bulgu burada da geçerli: Misère'de sıralamasız (soldan sağa) düzen merkezli düzenden derin
   iniyor. Turnuva ajanı Misère'de `none` + TT kullanacak.
-- **Hiçbir hamle 1 saniyeyi aşmadı** (en yavaş 0.941 s). Taşma (~40 ms) süre kontrolünün 1000 düğümde bir
+- **Hiçbir hamle 1 saniyeyi aşmadı** (en yavaş 0.934 s; ilk ölçümde 0.941 s). Taşma (~40 ms) süre kontrolünün 1000 düğümde bir
   yapılmasından gelir (≈ 1000 × 28 µs); ajan güvenlik payı için 0.85 s bütçe kullanır.
 
 **TT doğruluğu** (Aşama 2 testi tablo açıkken yeniden: 50 konum, sabit derinlik, uzatma kapalı):
@@ -268,4 +270,45 @@ süresini yazar.
 
 ## Aşama 5 — Turnuva ve yenilgi analizi
 
-_(doldurulacak)_
+**Ajan (`agent.py`).** `python agent.py --R 6 --C 8 --K 5 --V 2 --seed 7`. Standart girdiden `MOVES ...` okur,
+durumu hamle listesinden yeniden kurar, sütunu stdout'a yazıp hemen `flush` eder; `QUIT` ile kapanır; tanınmayan
+satırları (ör. "Sıra sizde") yok sayar; bütün log stderr'e gider. Arama: Aşama 4'ün `TimedSearch`'ü, hamle
+başına **0.85 s** bütçe (1 s limitine G/Ç ve süre kontrolü aralığı için pay), TT hamleler arasında korunur,
+çöp toplama yanıt yazıldıktan sonra yapılır. Misère'de `none`, diğer kurallarda taktik sıralama.
+**Güvenlik:** geçersiz hamle geçmişi, dolu tahta ya da arama hatasında bile her zaman dolu olmayan bir sütun
+yazar, asla çökmez (`tests/test_agent.py`). V = 3'te engeller `--seed` ile üretilir (turnuvada iki ajanın ortak
+değeri); gerekirse `--d` ile değiştirilir.
+
+**Turnuva provası** (`arena.py` hakemi: iki ajan ayrı süreç, yanıt süresi G/Ç dahil ölçülür, 1 s'yi aşan ya da
+yasa dışı hamle yapan kaybeder). Ajan, zayıflatılmış eski sürümüne (sabit derinlik 3, TT/uzatma yok) karşı;
+6×8 ve 7×8, K = 5, her V, iki yön; seed 7 (`results/stage5_rehearsal.csv`):
+
+| tahta | V=0 | V=1 | V=2 | V=3 |
+|---|---|---|---|---|
+| 6×8 (ajan MAX / MIN) | G / G | G / G | B / G | B / G |
+| 7×8 (ajan MAX / MIN) | B / G | G / G | B / G | G / **M** |
+
+Toplam **11 G – 4 B – 1 M** (G galibiyet, B beraberlik, M mağlubiyet; ajanın gözünden). **Süre aşımı / yasa dışı / geçersiz çıktı: 0**; ajanın en uzun yanıtı 0.890 s.
+
+**Provadan çıkan düzeltme: uzaklık ölçekli terminal değeri.** İlk provada ajan zayıf rakibe 2 oyun kaybetti. Kayıp
+oyunlarda ajan, kaybı kanıtladığı anda (değer −1) bütün hamleleri eşit görüp ilkini oynuyordu. Oysa derinlik-3
+rakip hata yapabilir; en iyi pratik, kaybı **en uzun geciktiren** hamledir. `TimedSearch.terminal_value`:
+`utility · (1 + kalan_hücre/1000)`; erken kazanç > geç kazanç, geç kayıp > erken kayıp; |değer| ≥ 1 hâlâ kesin
+sonuç (Eval < 0.99). `game.utility` ±1 olarak kaldı; doğruluk testleri `distance=False` ile çalışır.
+
+**Prova yenilgisinin analizi** (kendi provamdan; turnuva yenilgisi aşağıya eklenecek). Engelli varyant (V = 3, d = 7,
+engeller (2,2) ve (3,0)), ajan MIN: `2 5 3 3 4 4 5 4 4 1 3 4 3 3 2 1 3 4 2 7 6 6 0 0 7 1 1 1 1 6 6 6 6 7 7 7 7 5 5`.
+- *Hata nerede?* Ajanın her hamlesini 3 s ile yeniden aradım: 20. hamlede değer +0.17 (hafif kötü), 22. hamlede
+  **+1.009 (kanıtlanmış kayıp, derinlik 17)**. Belirleyici yapı: MAX'in 3. satırda (1–4. sütunlar) 4'lüsü, sağında
+  boş (3,5) hücresi. 5. sütun 2. satıra kadar dolduğunda oraya kim oynarsa MAX (3,5)'i alıp kazanır; tahta
+  dolarken sonunda MIN oraya oynamak zorunda kalır (zugzwang).
+- *Hangi karar yol açtı?* **Eval.** f1/f3 bir 4'lü pencereyi satırından bağımsız sayar; oysa standart kuralda bir
+  tehdidin **satır paritesi** (tek/çift) oyun sonunda kimin zorlanacağını belirler. Derinlik yeterli değildi:
+  zugzwang ancak ~17 kat derinde görülüyor, 1 s'de ulaşılan 9–11 katın ötesinde (ufuk etkisinin stratejik hâli).
+- *Sonraki sürümde ne değiştirirdim?* Eval'e "tehdit hücresinin satır paritesi" özniteliği eklerdim (ilk oyuncu
+  için tek satır, ikinci için çift satır tehditleri değerli). Daha derin aramaya göre tercih nedenim: Python'da
+  derinliği 6 kat artırmak ~b³ kat zaman ister, parite özniteliği ise sabit maliyetli ve tam bu hata sınıfını
+  hedefler. Misère'de karşılığı, güvenli hamle sayısının (f6) paritesidir.
+
+**Turnuva yenilgi analizi.** _(Turnuva sonrası doldurulacak: oyun kaydı, hatanın yapıldığı hamle, sorumlu karar
+(derinlik / Eval / sıralama / süre), sonraki sürüm önerisi.)_

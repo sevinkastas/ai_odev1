@@ -1,0 +1,17 @@
+"R×C, K",V,MAX,MIN,sonuç,hamle,"en uzun yanıt (ajanımız, s)"
+"6×8, 5",0,ajan,baseline,ajan (A kazandı),45,0.880
+"6×8, 5",0,baseline,ajan,ajan (B kazandı),44,0.883
+"6×8, 5",1,ajan,baseline,ajan (A kazandı),47,0.888
+"6×8, 5",1,baseline,ajan,ajan (B kazandı),36,0.890
+"6×8, 5",2,ajan,baseline,berabere,48,0.870
+"6×8, 5",2,baseline,ajan,ajan (B kazandı),43,0.870
+"6×8, 5",3,ajan,baseline,berabere,41,0.880
+"6×8, 5",3,baseline,ajan,ajan (B kazandı),40,0.879
+"7×8, 5",0,ajan,baseline,berabere,56,0.879
+"7×8, 5",0,baseline,ajan,ajan (B kazandı),50,0.882
+"7×8, 5",1,ajan,baseline,ajan (A kazandı),51,0.885
+"7×8, 5",1,baseline,ajan,ajan (B kazandı),44,0.886
+"7×8, 5",2,ajan,baseline,berabere,56,0.875
+"7×8, 5",2,baseline,ajan,ajan (B kazandı),55,0.876
+"7×8, 5",3,ajan,baseline,ajan (A kazandı),45,0.881
+"7×8, 5",3,baseline,ajan,baseline (A kazandı),45,0.890

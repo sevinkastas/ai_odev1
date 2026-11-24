@@ -250,9 +250,10 @@ class TimedSearch:
     """
 
     def __init__(self, game, evaluate, use_tt=True, extend=True, max_ext=4,
-                 order=order_tactical, check_every=1000, seed=52):
+                 order=order_tactical, check_every=1000, seed=52, distance=True):
         self.game, self.evaluate, self.order = game, evaluate, order
         self.use_tt, self.extend, self.max_ext = use_tt, extend, max_ext
+        self.distance = distance              # Aşama 5 düzeltmesi: çabuk kazan, geç kaybet
         self.check_every = check_every
         self.z = Zobrist(game, seed)
         self.tt = {}
@@ -325,7 +326,7 @@ class TimedSearch:
             raise Timeout()
         g = self.game
         if g.is_terminal(s):                   # 1) terminal
-            return g.utility(s)
+            return self.terminal_value(s)
         if depth <= 0:                         # 2) derinlik sınırı
             if self.extend and ext > 0 and self.is_forcing(s):
                 depth, ext = 1, ext - 1        # ufuk uzatması: sakin olmayan konumda 1 kat daha
@@ -381,6 +382,21 @@ class TimedSearch:
                 flag = EXACT
             self.tt[key] = (depth, v, flag, best)
         return v
+
+    # ------------------------------------------------------------------
+    def terminal_value(self, s):
+        """Kesin sonucun değeri (MAX gözüyle).
+        distance=False: utility (+1 / 0 / -1).
+        distance=True : kazanç/kayıp, oyunun bittiği hamleye göre ±1'in biraz ÖTESİNE ölçeklenir:
+            değer = utility * (1 + kalan_hücre / 1000)
+        Böylece erken kazanç daha büyük, geç kayıp daha az kötü olur: kayıp kanıtlandığında ajan
+        kaybı en uzun geciktiren hamleyi seçer (sığ arayan rakibe hata yapma fırsatı verir).
+        |değer| >= 1 hâlâ 'kesin sonuç' demektir, çünkü Eval her zaman |Eval| < 0.99."""
+        u = self.game.utility(s)
+        if not self.distance or u == 0:
+            return u
+        remaining = self.game.R * self.game.C - s.n_moves
+        return u * (1 + remaining / 1000)
 
     # ------------------------------------------------------------------
     def is_forcing(self, s):

@@ -31,3 +31,13 @@ Kullanılan araç: Claude Code (Claude Opus 5.5), VS Code eklentisi.
   "gürültülü" Eval kullanıldı.
 - **Kendim kontrol ettiğim:** β kesme koşulunu (`>=` → `>`, `<=`, `>= alpha`) kopyada bozup testlerin
   yakaladığını gördüm.
+
+## 5. Aşama 3 — Değerlendirme fonksiyonu ve ağırlık ayarı
+- **Ne istedim:** Önceden hesaplanmış K-pencereleri üzerinde Misère'ye uygun işaretli, [-1, +1]'e sıkıştırılmış
+  Eval; Misère'ye özgü öznitelik; 3 ağırlık vektörüyle iki yönlü maç deneyi.
+- **Kullandığım kısım:** `evaluate.py` (make_windows, Evaluator.features/raw/__call__, WEIGHTS, opening,
+  play_game, komut satırı çıktısı), `tests/test_evaluate.py`, `experiments.py stage3`,
+  stage2'ye gerçek Eval seçeneği (`full`).
+- **Önerinin gerekçesi:** Misère'ye özgü öznitelik olarak "güvenli hamle farkı" (oyuncunun intihar etmeden
+  oynayabileceği sütun sayısı farkı) seçildi; Misère oyun sonu zugzwang ile belirlenir.
+- **Kendim kontrol ettiğim:** `python evaluate.py 0 0 1 1 2 2 3 3` çıktısındaki öznitelikleri tahtada elle saydım.

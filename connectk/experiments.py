@@ -4,6 +4,7 @@
     python experiments.py stage0 --max-n 5
     python experiments.py stage1            # minimax: hamle, düğüm, b_etkin
     python experiments.py stage2            # 50 konum: minimax vs α-β, 3 sıralama, grafik
+    python experiments.py stage3            # 3 ağırlık vektörü, her çift iki yönde 10'ar maç
 
 Çıktılar ekrana Markdown tablosu olarak basılır ve results/ klasörüne CSV olarak yazılır.
 Varyant parametreleri komut satırından değiştirilebilir (--R --C --K --V --d).
@@ -16,7 +17,8 @@ import os
 import sys
 import time
 
-from game import Game, perft, random_positions
+from game import Game, perft, random_positions, MAX, MIN
+from evaluate import Evaluator, WEIGHTS, opening, play_game
 from search import (minimax_decision, alphabeta_decision, ORDERINGS,
                     zero_eval, noise_eval)
 
@@ -101,7 +103,10 @@ def stage1(game, args):
 # ----------------------------------------------------------------------
 # Aşama 2: 50 rastgele konumda minimax vs α-β (3 sıralama)
 # ----------------------------------------------------------------------
-EVALS = {"zero": zero_eval, "noise": noise_eval}
+# Her Eval bir "fabrika": game -> evaluate(game, s). Gerçek Eval pencereleri game'e göre hesaplar.
+EVALS = {"zero": lambda game: zero_eval,
+         "noise": lambda game: noise_eval,
+         "full": lambda game: Evaluator(game)}
 
 
 def stage2(game, args):
@@ -112,7 +117,7 @@ def stage2(game, args):
     per_pos = []                      # her konum için ayrıntılı satır
     summary = []
     for ev_name in args.evals.split(","):
-        evaluate = EVALS[ev_name]
+        evaluate = EVALS[ev_name](game)
         mm_nodes, mm_time, mismatches = [], 0.0, 0
         ab = {k: {"nodes": [], "time": 0.0} for k in ORDERINGS}
         for i, s in enumerate(positions):
@@ -191,9 +196,9 @@ def plot_stage2(summary, depth):
     methods = ["minimax", "none", "center_out", "tactical_center_out"]
     labels = ["minimax", "α-β\n(a) sırasız", "α-β\n(b) merkez", "α-β\n(c) taktik+merkez"]
     evals = sorted({r[0] for r in summary}, key=lambda e: list(EVALS).index(e))
-    colors = {"zero": "#2a78d6", "noise": "#eb6834"}
-    names = {"zero": "Eval = 0", "noise": "gürültülü Eval"}
-    width = 0.38
+    colors = {"zero": "#2a78d6", "noise": "#eb6834", "full": "#1baf7a"}
+    names = {"zero": "Eval = 0", "noise": "gürültülü Eval", "full": "gerçek Eval (Aşama 3)"}
+    width = 0.8 / len(evals) - 0.02
 
     fig, ax = plt.subplots(figsize=(7.5, 4.2), dpi=150)
     fig.patch.set_facecolor("#fcfcfb")
@@ -202,7 +207,10 @@ def plot_stage2(summary, depth):
         vals = [float(next(r[2] for r in summary if r[0] == ev and r[1] == m)) for m in methods]
         xs = [i + (j - (len(evals) - 1) / 2) * (width + 0.02) for i in range(len(methods))]
         bars = ax.bar(xs, vals, width, color=colors[ev], label=names[ev], zorder=2)
-        for b, v in zip(bars, vals):
+        for k, (b, v) in enumerate(zip(bars, vals)):
+            # minimax her Eval için aynı düğüm sayısını verir: etiketi yalnızca ortadaki çubuğa yaz
+            if methods[k] == "minimax" and j != (len(evals) - 1) // 2:
+                continue
             ax.text(b.get_x() + b.get_width() / 2, v * 1.12, f"{v:,.0f}".replace(",", "."),
                     ha="center", va="bottom", fontsize=7.5, color="#3d3d3a")
     # Knuth-Moore en iyi durum (mükemmel sıralama): b^ceil(d/2) + b^floor(d/2) - 1 yaprak
@@ -229,9 +237,61 @@ def plot_stage2(summary, depth):
 
 
 # ----------------------------------------------------------------------
+# Aşama 3: ağırlık vektörleri turnuvası
+# ----------------------------------------------------------------------
+def stage3(game, args):
+    names = list(WEIGHTS)
+    wins = {a: {b: [0, 0, 0] for b in names} for a in names}   # [galibiyet, beraberlik, yenilgi]
+    as_max = {a: [0, 0] for a in names}                         # [MAX iken galibiyet, MAX iken oyun]
+    games_rows = []
+    t_start = time.perf_counter()
+    for i, a in enumerate(names):
+        for b in names[i + 1:]:
+            for g_idx in range(args.games):
+                open_seed = args.seed * 1000 + g_idx      # aynı açılış iki yönde de kullanılır
+                op = opening(game, open_seed)
+                for first, second in ((a, b), (b, a)):
+                    winner, moves = play_game(game, WEIGHTS[first], WEIGHTS[second], op, depth=args.depth)
+                    res = {MAX: (first, second), MIN: (second, first)}.get(winner)
+                    if res is None:
+                        wins[first][second][1] += 1
+                        wins[second][first][1] += 1
+                    else:
+                        w, l = res
+                        wins[w][l][0] += 1
+                        wins[l][w][2] += 1
+                    as_max[first][1] += 1
+                    as_max[first][0] += (winner == MAX)
+                    label = {MAX: first, MIN: second}.get(winner, "berabere")
+                    games_rows.append([first, second, open_seed, " ".join(map(str, op)),
+                                       label, len(moves), " ".join(map(str, moves))])
+                    print(f"  {first} (MAX) - {second} (MIN), açılış {op}: {label}, {len(moves)} hamle",
+                          file=sys.stderr)
+    elapsed = time.perf_counter() - t_start
+
+    header = ["vektör / rakip"] + names + ["toplam G-B-M"]
+    rows = []
+    for a in names:
+        tot = [sum(wins[a][b][k] for b in names if b != a) for k in range(3)]
+        rows.append([a] + ["-" if a == b else "{}-{}-{}".format(*wins[a][b]) for b in names]
+                    + ["{}-{}-{}".format(*tot)])
+    print()
+    print(f"seed = {args.seed}, derinlik {args.depth}, çift başına {2 * args.games} oyun, "
+          f"toplam süre {elapsed:.0f} s. Hücre: galibiyet-beraberlik-mağlubiyet (satırdaki vektör için)")
+    print()
+    print_table(header, rows)
+    write_csv("stage3_weights.csv", header, rows)
+    print()
+    print_table(["vektör", "ağırlıklar", "MAX iken galibiyet / oyun"],
+                [[a, WEIGHTS[a], f"{as_max[a][0]}/{as_max[a][1]}"] for a in names])
+    write_csv("stage3_games.csv", ["MAX", "MIN", "açılış_seed", "açılış", "kazanan", "hamle_sayısı", "hamleler"],
+              games_rows)
+
+
+# ----------------------------------------------------------------------
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("stage", choices=["stage0", "stage1", "stage2"])
+    p.add_argument("stage", choices=["stage0", "stage1", "stage2", "stage3"])
     p.add_argument("--R", type=int, default=6)
     p.add_argument("--C", type=int, default=8)
     p.add_argument("--K", type=int, default=5)
@@ -241,11 +301,12 @@ def main():
     p.add_argument("--depth", type=int, default=6)
     p.add_argument("--seed", type=int, default=52)
     p.add_argument("--n-pos", type=int, default=50)
-    p.add_argument("--evals", default="zero,noise")
+    p.add_argument("--evals", default="zero,noise,full")
+    p.add_argument("--games", type=int, default=10)
     args = p.parse_args()
     game = Game(args.R, args.C, args.K, args.V, args.d)
     print(f"Varyant (R, C, K, V, d) = ({game.R}, {game.C}, {game.K}, {game.V}, {game.d})\n")
-    {"stage0": stage0, "stage1": stage1, "stage2": stage2}[args.stage](game, args)
+    {"stage0": stage0, "stage1": stage1, "stage2": stage2, "stage3": stage3}[args.stage](game, args)
 
 
 if __name__ == "__main__":
